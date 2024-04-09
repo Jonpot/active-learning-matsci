@@ -1,0 +1,216 @@
+====================================================================================================
+Layer (type:depth-idx)                             Output Shape              Param #
+====================================================================================================
+EfficientNet3D                                     [1, 9]                    --
+├─Conv3dStaticSamePadding: 1-1                     [1, 32, 64, 64, 64]       864
+│    └─ZeroPad3d: 2-1                              [1, 1, 129, 129, 129]     --
+├─BatchNorm3d: 1-2                                 [1, 32, 64, 64, 64]       64
+├─MemoryEfficientSwish: 1-3                        [1, 32, 64, 64, 64]       --
+├─ModuleList: 1-4                                  --                        --
+│    └─MBConvBlock3D: 2-2                          [1, 16, 64, 64, 64]       --
+│    │    └─Conv3dDynamicSamePadding: 3-1          [1, 32, 64, 64, 64]       864
+│    │    └─BatchNorm3d: 3-2                       [1, 32, 64, 64, 64]       64
+│    │    └─MemoryEfficientSwish: 3-3              [1, 32, 64, 64, 64]       --
+│    │    └─Conv3dStaticSamePadding: 3-4           [1, 8, 1, 1, 1]           264
+│    │    └─MemoryEfficientSwish: 3-5              [1, 8, 1, 1, 1]           --
+│    │    └─Conv3dStaticSamePadding: 3-6           [1, 32, 1, 1, 1]          288
+│    │    └─Conv3dDynamicSamePadding: 3-7          [1, 16, 64, 64, 64]       512
+│    │    └─BatchNorm3d: 3-8                       [1, 16, 64, 64, 64]       32
+│    └─MBConvBlock3D: 2-3                          [1, 24, 32, 32, 32]       --
+│    │    └─Conv3dDynamicSamePadding: 3-9          [1, 96, 64, 64, 64]       1,536
+│    │    └─BatchNorm3d: 3-10                      [1, 96, 64, 64, 64]       192
+│    │    └─MemoryEfficientSwish: 3-11             [1, 96, 64, 64, 64]       --
+│    │    └─Conv3dDynamicSamePadding: 3-12         [1, 96, 32, 32, 32]       2,592
+│    │    └─BatchNorm3d: 3-13                      [1, 96, 32, 32, 32]       192
+│    │    └─MemoryEfficientSwish: 3-14             [1, 96, 32, 32, 32]       --
+│    │    └─Conv3dStaticSamePadding: 3-15          [1, 4, 1, 1, 1]           388
+│    │    └─MemoryEfficientSwish: 3-16             [1, 4, 1, 1, 1]           --
+│    │    └─Conv3dStaticSamePadding: 3-17          [1, 96, 1, 1, 1]          480
+│    │    └─Conv3dDynamicSamePadding: 3-18         [1, 24, 32, 32, 32]       2,304
+│    │    └─BatchNorm3d: 3-19                      [1, 24, 32, 32, 32]       48
+│    └─MBConvBlock3D: 2-4                          [1, 24, 32, 32, 32]       --
+│    │    └─Conv3dDynamicSamePadding: 3-20         [1, 144, 32, 32, 32]      3,456
+│    │    └─BatchNorm3d: 3-21                      [1, 144, 32, 32, 32]      288
+│    │    └─MemoryEfficientSwish: 3-22             [1, 144, 32, 32, 32]      --
+│    │    └─Conv3dDynamicSamePadding: 3-23         [1, 144, 32, 32, 32]      3,888
+│    │    └─BatchNorm3d: 3-24                      [1, 144, 32, 32, 32]      288
+│    │    └─MemoryEfficientSwish: 3-25             [1, 144, 32, 32, 32]      --
+│    │    └─Conv3dStaticSamePadding: 3-26          [1, 6, 1, 1, 1]           870
+│    │    └─MemoryEfficientSwish: 3-27             [1, 6, 1, 1, 1]           --
+│    │    └─Conv3dStaticSamePadding: 3-28          [1, 144, 1, 1, 1]         1,008
+│    │    └─Conv3dDynamicSamePadding: 3-29         [1, 24, 32, 32, 32]       3,456
+│    │    └─BatchNorm3d: 3-30                      [1, 24, 32, 32, 32]       48
+│    └─MBConvBlock3D: 2-5                          [1, 40, 16, 16, 16]       --
+│    │    └─Conv3dDynamicSamePadding: 3-31         [1, 144, 32, 32, 32]      3,456
+│    │    └─BatchNorm3d: 3-32                      [1, 144, 32, 32, 32]      288
+│    │    └─MemoryEfficientSwish: 3-33             [1, 144, 32, 32, 32]      --
+│    │    └─Conv3dDynamicSamePadding: 3-34         [1, 144, 16, 16, 16]      18,000
+│    │    └─BatchNorm3d: 3-35                      [1, 144, 16, 16, 16]      288
+│    │    └─MemoryEfficientSwish: 3-36             [1, 144, 16, 16, 16]      --
+│    │    └─Conv3dStaticSamePadding: 3-37          [1, 6, 1, 1, 1]           870
+│    │    └─MemoryEfficientSwish: 3-38             [1, 6, 1, 1, 1]           --
+│    │    └─Conv3dStaticSamePadding: 3-39          [1, 144, 1, 1, 1]         1,008
+│    │    └─Conv3dDynamicSamePadding: 3-40         [1, 40, 16, 16, 16]       5,760
+│    │    └─BatchNorm3d: 3-41                      [1, 40, 16, 16, 16]       80
+│    └─MBConvBlock3D: 2-6                          [1, 40, 16, 16, 16]       --
+│    │    └─Conv3dDynamicSamePadding: 3-42         [1, 240, 16, 16, 16]      9,600
+│    │    └─BatchNorm3d: 3-43                      [1, 240, 16, 16, 16]      480
+│    │    └─MemoryEfficientSwish: 3-44             [1, 240, 16, 16, 16]      --
+│    │    └─Conv3dDynamicSamePadding: 3-45         [1, 240, 16, 16, 16]      30,000
+│    │    └─BatchNorm3d: 3-46                      [1, 240, 16, 16, 16]      480
+│    │    └─MemoryEfficientSwish: 3-47             [1, 240, 16, 16, 16]      --
+│    │    └─Conv3dStaticSamePadding: 3-48          [1, 10, 1, 1, 1]          2,410
+│    │    └─MemoryEfficientSwish: 3-49             [1, 10, 1, 1, 1]          --
+│    │    └─Conv3dStaticSamePadding: 3-50          [1, 240, 1, 1, 1]         2,640
+│    │    └─Conv3dDynamicSamePadding: 3-51         [1, 40, 16, 16, 16]       9,600
+│    │    └─BatchNorm3d: 3-52                      [1, 40, 16, 16, 16]       80
+│    └─MBConvBlock3D: 2-7                          [1, 80, 8, 8, 8]          --
+│    │    └─Conv3dDynamicSamePadding: 3-53         [1, 240, 16, 16, 16]      9,600
+│    │    └─BatchNorm3d: 3-54                      [1, 240, 16, 16, 16]      480
+│    │    └─MemoryEfficientSwish: 3-55             [1, 240, 16, 16, 16]      --
+│    │    └─Conv3dDynamicSamePadding: 3-56         [1, 240, 8, 8, 8]         6,480
+│    │    └─BatchNorm3d: 3-57                      [1, 240, 8, 8, 8]         480
+│    │    └─MemoryEfficientSwish: 3-58             [1, 240, 8, 8, 8]         --
+│    │    └─Conv3dStaticSamePadding: 3-59          [1, 10, 1, 1, 1]          2,410
+│    │    └─MemoryEfficientSwish: 3-60             [1, 10, 1, 1, 1]          --
+│    │    └─Conv3dStaticSamePadding: 3-61          [1, 240, 1, 1, 1]         2,640
+│    │    └─Conv3dDynamicSamePadding: 3-62         [1, 80, 8, 8, 8]          19,200
+│    │    └─BatchNorm3d: 3-63                      [1, 80, 8, 8, 8]          160
+│    └─MBConvBlock3D: 2-8                          [1, 80, 8, 8, 8]          --
+│    │    └─Conv3dDynamicSamePadding: 3-64         [1, 480, 8, 8, 8]         38,400
+│    │    └─BatchNorm3d: 3-65                      [1, 480, 8, 8, 8]         960
+│    │    └─MemoryEfficientSwish: 3-66             [1, 480, 8, 8, 8]         --
+│    │    └─Conv3dDynamicSamePadding: 3-67         [1, 480, 8, 8, 8]         12,960
+│    │    └─BatchNorm3d: 3-68                      [1, 480, 8, 8, 8]         960
+│    │    └─MemoryEfficientSwish: 3-69             [1, 480, 8, 8, 8]         --
+│    │    └─Conv3dStaticSamePadding: 3-70          [1, 20, 1, 1, 1]          9,620
+│    │    └─MemoryEfficientSwish: 3-71             [1, 20, 1, 1, 1]          --
+│    │    └─Conv3dStaticSamePadding: 3-72          [1, 480, 1, 1, 1]         10,080
+│    │    └─Conv3dDynamicSamePadding: 3-73         [1, 80, 8, 8, 8]          38,400
+│    │    └─BatchNorm3d: 3-74                      [1, 80, 8, 8, 8]          160
+│    └─MBConvBlock3D: 2-9                          [1, 80, 8, 8, 8]          --
+│    │    └─Conv3dDynamicSamePadding: 3-75         [1, 480, 8, 8, 8]         38,400
+│    │    └─BatchNorm3d: 3-76                      [1, 480, 8, 8, 8]         960
+│    │    └─MemoryEfficientSwish: 3-77             [1, 480, 8, 8, 8]         --
+│    │    └─Conv3dDynamicSamePadding: 3-78         [1, 480, 8, 8, 8]         12,960
+│    │    └─BatchNorm3d: 3-79                      [1, 480, 8, 8, 8]         960
+│    │    └─MemoryEfficientSwish: 3-80             [1, 480, 8, 8, 8]         --
+│    │    └─Conv3dStaticSamePadding: 3-81          [1, 20, 1, 1, 1]          9,620
+│    │    └─MemoryEfficientSwish: 3-82             [1, 20, 1, 1, 1]          --
+│    │    └─Conv3dStaticSamePadding: 3-83          [1, 480, 1, 1, 1]         10,080
+│    │    └─Conv3dDynamicSamePadding: 3-84         [1, 80, 8, 8, 8]          38,400
+│    │    └─BatchNorm3d: 3-85                      [1, 80, 8, 8, 8]          160
+│    └─MBConvBlock3D: 2-10                         [1, 112, 8, 8, 8]         --
+│    │    └─Conv3dDynamicSamePadding: 3-86         [1, 480, 8, 8, 8]         38,400
+│    │    └─BatchNorm3d: 3-87                      [1, 480, 8, 8, 8]         960
+│    │    └─MemoryEfficientSwish: 3-88             [1, 480, 8, 8, 8]         --
+│    │    └─Conv3dDynamicSamePadding: 3-89         [1, 480, 8, 8, 8]         60,000
+│    │    └─BatchNorm3d: 3-90                      [1, 480, 8, 8, 8]         960
+│    │    └─MemoryEfficientSwish: 3-91             [1, 480, 8, 8, 8]         --
+│    │    └─Conv3dStaticSamePadding: 3-92          [1, 20, 1, 1, 1]          9,620
+│    │    └─MemoryEfficientSwish: 3-93             [1, 20, 1, 1, 1]          --
+│    │    └─Conv3dStaticSamePadding: 3-94          [1, 480, 1, 1, 1]         10,080
+│    │    └─Conv3dDynamicSamePadding: 3-95         [1, 112, 8, 8, 8]         53,760
+│    │    └─BatchNorm3d: 3-96                      [1, 112, 8, 8, 8]         224
+│    └─MBConvBlock3D: 2-11                         [1, 112, 8, 8, 8]         --
+│    │    └─Conv3dDynamicSamePadding: 3-97         [1, 672, 8, 8, 8]         75,264
+│    │    └─BatchNorm3d: 3-98                      [1, 672, 8, 8, 8]         1,344
+│    │    └─MemoryEfficientSwish: 3-99             [1, 672, 8, 8, 8]         --
+│    │    └─Conv3dDynamicSamePadding: 3-100        [1, 672, 8, 8, 8]         84,000
+│    │    └─BatchNorm3d: 3-101                     [1, 672, 8, 8, 8]         1,344
+│    │    └─MemoryEfficientSwish: 3-102            [1, 672, 8, 8, 8]         --
+│    │    └─Conv3dStaticSamePadding: 3-103         [1, 28, 1, 1, 1]          18,844
+│    │    └─MemoryEfficientSwish: 3-104            [1, 28, 1, 1, 1]          --
+│    │    └─Conv3dStaticSamePadding: 3-105         [1, 672, 1, 1, 1]         19,488
+│    │    └─Conv3dDynamicSamePadding: 3-106        [1, 112, 8, 8, 8]         75,264
+│    │    └─BatchNorm3d: 3-107                     [1, 112, 8, 8, 8]         224
+│    └─MBConvBlock3D: 2-12                         [1, 112, 8, 8, 8]         --
+│    │    └─Conv3dDynamicSamePadding: 3-108        [1, 672, 8, 8, 8]         75,264
+│    │    └─BatchNorm3d: 3-109                     [1, 672, 8, 8, 8]         1,344
+│    │    └─MemoryEfficientSwish: 3-110            [1, 672, 8, 8, 8]         --
+│    │    └─Conv3dDynamicSamePadding: 3-111        [1, 672, 8, 8, 8]         84,000
+│    │    └─BatchNorm3d: 3-112                     [1, 672, 8, 8, 8]         1,344
+│    │    └─MemoryEfficientSwish: 3-113            [1, 672, 8, 8, 8]         --
+│    │    └─Conv3dStaticSamePadding: 3-114         [1, 28, 1, 1, 1]          18,844
+│    │    └─MemoryEfficientSwish: 3-115            [1, 28, 1, 1, 1]          --
+│    │    └─Conv3dStaticSamePadding: 3-116         [1, 672, 1, 1, 1]         19,488
+│    │    └─Conv3dDynamicSamePadding: 3-117        [1, 112, 8, 8, 8]         75,264
+│    │    └─BatchNorm3d: 3-118                     [1, 112, 8, 8, 8]         224
+│    └─MBConvBlock3D: 2-13                         [1, 192, 4, 4, 4]         --
+│    │    └─Conv3dDynamicSamePadding: 3-119        [1, 672, 8, 8, 8]         75,264
+│    │    └─BatchNorm3d: 3-120                     [1, 672, 8, 8, 8]         1,344
+│    │    └─MemoryEfficientSwish: 3-121            [1, 672, 8, 8, 8]         --
+│    │    └─Conv3dDynamicSamePadding: 3-122        [1, 672, 4, 4, 4]         84,000
+│    │    └─BatchNorm3d: 3-123                     [1, 672, 4, 4, 4]         1,344
+│    │    └─MemoryEfficientSwish: 3-124            [1, 672, 4, 4, 4]         --
+│    │    └─Conv3dStaticSamePadding: 3-125         [1, 28, 1, 1, 1]          18,844
+│    │    └─MemoryEfficientSwish: 3-126            [1, 28, 1, 1, 1]          --
+│    │    └─Conv3dStaticSamePadding: 3-127         [1, 672, 1, 1, 1]         19,488
+│    │    └─Conv3dDynamicSamePadding: 3-128        [1, 192, 4, 4, 4]         129,024
+│    │    └─BatchNorm3d: 3-129                     [1, 192, 4, 4, 4]         384
+│    └─MBConvBlock3D: 2-14                         [1, 192, 4, 4, 4]         --
+│    │    └─Conv3dDynamicSamePadding: 3-130        [1, 1152, 4, 4, 4]        221,184
+│    │    └─BatchNorm3d: 3-131                     [1, 1152, 4, 4, 4]        2,304
+│    │    └─MemoryEfficientSwish: 3-132            [1, 1152, 4, 4, 4]        --
+│    │    └─Conv3dDynamicSamePadding: 3-133        [1, 1152, 4, 4, 4]        144,000
+│    │    └─BatchNorm3d: 3-134                     [1, 1152, 4, 4, 4]        2,304
+│    │    └─MemoryEfficientSwish: 3-135            [1, 1152, 4, 4, 4]        --
+│    │    └─Conv3dStaticSamePadding: 3-136         [1, 48, 1, 1, 1]          55,344
+│    │    └─MemoryEfficientSwish: 3-137            [1, 48, 1, 1, 1]          --
+│    │    └─Conv3dStaticSamePadding: 3-138         [1, 1152, 1, 1, 1]        56,448
+│    │    └─Conv3dDynamicSamePadding: 3-139        [1, 192, 4, 4, 4]         221,184
+│    │    └─BatchNorm3d: 3-140                     [1, 192, 4, 4, 4]         384
+│    └─MBConvBlock3D: 2-15                         [1, 192, 4, 4, 4]         --
+│    │    └─Conv3dDynamicSamePadding: 3-141        [1, 1152, 4, 4, 4]        221,184
+│    │    └─BatchNorm3d: 3-142                     [1, 1152, 4, 4, 4]        2,304
+│    │    └─MemoryEfficientSwish: 3-143            [1, 1152, 4, 4, 4]        --
+│    │    └─Conv3dDynamicSamePadding: 3-144        [1, 1152, 4, 4, 4]        144,000
+│    │    └─BatchNorm3d: 3-145                     [1, 1152, 4, 4, 4]        2,304
+│    │    └─MemoryEfficientSwish: 3-146            [1, 1152, 4, 4, 4]        --
+│    │    └─Conv3dStaticSamePadding: 3-147         [1, 48, 1, 1, 1]          55,344
+│    │    └─MemoryEfficientSwish: 3-148            [1, 48, 1, 1, 1]          --
+│    │    └─Conv3dStaticSamePadding: 3-149         [1, 1152, 1, 1, 1]        56,448
+│    │    └─Conv3dDynamicSamePadding: 3-150        [1, 192, 4, 4, 4]         221,184
+│    │    └─BatchNorm3d: 3-151                     [1, 192, 4, 4, 4]         384
+│    └─MBConvBlock3D: 2-16                         [1, 192, 4, 4, 4]         --
+│    │    └─Conv3dDynamicSamePadding: 3-152        [1, 1152, 4, 4, 4]        221,184
+│    │    └─BatchNorm3d: 3-153                     [1, 1152, 4, 4, 4]        2,304
+│    │    └─MemoryEfficientSwish: 3-154            [1, 1152, 4, 4, 4]        --
+│    │    └─Conv3dDynamicSamePadding: 3-155        [1, 1152, 4, 4, 4]        144,000
+│    │    └─BatchNorm3d: 3-156                     [1, 1152, 4, 4, 4]        2,304
+│    │    └─MemoryEfficientSwish: 3-157            [1, 1152, 4, 4, 4]        --
+│    │    └─Conv3dStaticSamePadding: 3-158         [1, 48, 1, 1, 1]          55,344
+│    │    └─MemoryEfficientSwish: 3-159            [1, 48, 1, 1, 1]          --
+│    │    └─Conv3dStaticSamePadding: 3-160         [1, 1152, 1, 1, 1]        56,448
+│    │    └─Conv3dDynamicSamePadding: 3-161        [1, 192, 4, 4, 4]         221,184
+│    │    └─BatchNorm3d: 3-162                     [1, 192, 4, 4, 4]         384
+│    └─MBConvBlock3D: 2-17                         [1, 320, 4, 4, 4]         --
+│    │    └─Conv3dDynamicSamePadding: 3-163        [1, 1152, 4, 4, 4]        221,184
+│    │    └─BatchNorm3d: 3-164                     [1, 1152, 4, 4, 4]        2,304
+│    │    └─MemoryEfficientSwish: 3-165            [1, 1152, 4, 4, 4]        --
+│    │    └─Conv3dDynamicSamePadding: 3-166        [1, 1152, 4, 4, 4]        31,104
+│    │    └─BatchNorm3d: 3-167                     [1, 1152, 4, 4, 4]        2,304
+│    │    └─MemoryEfficientSwish: 3-168            [1, 1152, 4, 4, 4]        --
+│    │    └─Conv3dStaticSamePadding: 3-169         [1, 48, 1, 1, 1]          55,344
+│    │    └─MemoryEfficientSwish: 3-170            [1, 48, 1, 1, 1]          --
+│    │    └─Conv3dStaticSamePadding: 3-171         [1, 1152, 1, 1, 1]        56,448
+│    │    └─Conv3dDynamicSamePadding: 3-172        [1, 320, 4, 4, 4]         368,640
+│    │    └─BatchNorm3d: 3-173                     [1, 320, 4, 4, 4]         640
+├─Conv3dStaticSamePadding: 1-5                     [1, 1280, 4, 4, 4]        409,600
+│    └─Identity: 2-18                              [1, 320, 4, 4, 4]         --
+├─BatchNorm3d: 1-6                                 [1, 1280, 4, 4, 4]        2,560
+├─MemoryEfficientSwish: 1-7                        [1, 1280, 4, 4, 4]        --
+├─AdaptiveAvgPool3d: 1-8                           [1, 1280, 1, 1, 1]        --
+├─Dropout: 1-9                                     [1, 1280]                 --
+├─Linear: 1-10                                     [1, 9]                    11,529
+====================================================================================================
+Total params: 4,699,909
+Trainable params: 4,699,909
+Non-trainable params: 0
+Total mult-adds (G): 2.36
+====================================================================================================
+Input size (MB): 8.39
+Forward/backward pass size (MB): 1104.64
+Params size (MB): 14.61
+Estimated Total Size (MB): 1127.64
+====================================================================================================

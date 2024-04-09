@@ -1,0 +1,135 @@
+===================================================================================================================
+Layer (type:depth-idx)                                            Output Shape              Param #
+===================================================================================================================
+EfficientUnetPlusPlus3D                                           [1, 1, 128, 128, 128]     --
+├─EfficientNet3DEncoder: 1-1                                      [1, 1, 128, 128, 128]     412,160
+│    └─Conv3dStaticSamePadding: 2-1                               [1, 32, 64, 64, 64]       864
+│    │    └─ZeroPad3d: 3-1                                        [1, 1, 129, 129, 129]     --
+│    └─BatchNorm3d: 2-2                                           [1, 32, 64, 64, 64]       64
+│    └─MemoryEfficientSwish: 2-3                                  [1, 32, 64, 64, 64]       --
+│    └─ModuleList: 2-4                                            --                        --
+│    │    └─MBConvBlock3D: 3-2                                    [1, 16, 64, 64, 64]       2,024
+│    │    └─MBConvBlock3D: 3-3                                    [1, 24, 32, 32, 32]       7,732
+│    │    └─MBConvBlock3D: 3-4                                    [1, 24, 32, 32, 32]       13,302
+│    │    └─MBConvBlock3D: 3-5                                    [1, 40, 16, 16, 16]       29,750
+│    │    └─MBConvBlock3D: 3-6                                    [1, 40, 16, 16, 16]       55,290
+│    │    └─MBConvBlock3D: 3-7                                    [1, 80, 8, 8, 8]          41,450
+│    │    └─MBConvBlock3D: 3-8                                    [1, 80, 8, 8, 8]          111,540
+│    │    └─MBConvBlock3D: 3-9                                    [1, 80, 8, 8, 8]          111,540
+│    │    └─MBConvBlock3D: 3-10                                   [1, 112, 8, 8, 8]         174,004
+│    │    └─MBConvBlock3D: 3-11                                   [1, 112, 8, 8, 8]         275,772
+│    │    └─MBConvBlock3D: 3-12                                   [1, 112, 8, 8, 8]         275,772
+│    │    └─MBConvBlock3D: 3-13                                   [1, 192, 4, 4, 4]         329,692
+│    │    └─MBConvBlock3D: 3-14                                   [1, 192, 4, 4, 4]         703,152
+│    │    └─MBConvBlock3D: 3-15                                   [1, 192, 4, 4, 4]         703,152
+│    │    └─MBConvBlock3D: 3-16                                   [1, 192, 4, 4, 4]         703,152
+│    │    └─MBConvBlock3D: 3-17                                   [1, 320, 4, 4, 4]         737,968
+├─EfficientUnetPlusPlus3DDecoder: 1-2                             [1, 16, 128, 128, 128]    --
+│    └─ModuleDict: 2-5                                            --                        --
+│    │    └─DecoderBlock: 3-18                                    [1, 256, 8, 8, 8]         1,070,274
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-26                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-26                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-26                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-26                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-27                                    [1, 40, 16, 16, 16]       95,146
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-35                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-35                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-35                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-35                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-36                                    [1, 24, 32, 32, 32]       21,050
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-44                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-44                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-44                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-44                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-45                                    [1, 32, 64, 64, 64]       20,546
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-53                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-53                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-53                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-53                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-54                                    [1, 128, 16, 16, 16]      508,098
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-62                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-62                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-62                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-62                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-63                                    [1, 24, 32, 32, 32]       34,010
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-71                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-71                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-71                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-71                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-72                                    [1, 32, 64, 64, 64]       37,570
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-80                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-80                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-80                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-80                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-81                                    [1, 64, 32, 32, 32]       172,066
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-89                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-89                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-89                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-89                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-90                                    [1, 32, 64, 64, 64]       60,738
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-98                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-98                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-98                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-98                                    --                        (recursive)
+│    │    └─DecoderBlock: 3-99                                    [1, 32, 64, 64, 64]       135,330
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-107                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-107                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-107                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-106                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-107                                   --                        (recursive)
+│    │    └─DecoderBlock: 3-108                                   [1, 16, 128, 128, 128]    6,994
+├─SegmentationHead: 1-3                                           [1, 1, 128, 128, 128]     --
+│    └─Conv3d: 2-6                                                [1, 1, 128, 128, 128]     433
+│    └─Identity: 2-7                                              [1, 1, 128, 128, 128]     --
+│    └─Activation: 2-8                                            [1, 1, 128, 128, 128]     --
+│    │    └─Identity: 3-109                                       [1, 1, 128, 128, 128]     --
+===================================================================================================================
+Total params: 8,870,402
+Trainable params: 8,870,402
+Non-trainable params: 0
+Total mult-adds (G): 47.61
+===================================================================================================================
+Input size (MB): 8.39
+Forward/backward pass size (MB): 13313.52
+Params size (MB): 23.20
+Estimated Total Size (MB): 13345.11
+===================================================================================================================
