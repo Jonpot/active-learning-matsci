@@ -27,6 +27,22 @@ def COVDROP(model, data, num_samples=100):
 
     return covdrop_scores
 
+# BELOW IS COVLAP IMPLEMENTATION AND RELATED FUNCTIONS
+
+def ranges(*args):
+    """
+    Takes arguments ([start,] stop, step).
+    Returns a list of pairs consisting of
+    (start_i, stop_i), which together divide
+    up range(start, stop) into chunks of size
+    step (plus final chunk).
+    """
+    if len(args) == 2:
+        args = (0,) + args
+    stop = args[-2]
+    edges = list(range(*args)) + [stop]
+    return list(zip(edges[:-1], edges[1:]))
+
 def COVLAP(model, data):
     ''' 
     Given a model and a dataset, this function calculates the COVLAP score for each point in the dataset. 
@@ -36,6 +52,49 @@ def COVLAP(model, data):
     The COVLAP score is calculated as the variance of the predictions of the model with Laplace approximation enabled. 
     The variance is calculated using the Hessian of the model's loss function. 
     '''
+
+    # IMPORTANT: AN IMPORTANT ASSUMTION IS THAT THE EMBEDDINGS/FIELD PREDS ARE ONE DIMENSIONAL
+    # FOR SINGLE DATA POINT, MEANING 2 DIMENSIONAL FOR AN ARRAY OF DATAPOINTS. IF THIS NOT TRUE,
+    # THEN WILL NEED THE ORIGINAL, MUCH MORE COMPLEX LOOKING CODE. 
+
+    # getting the embedding from the data 
+    # shape of data assumed to be (n,f); n: number of data points, f: features in data points 
+    X = model.embedding(data)
+    # embedding assumed to be 2 dimensional, shape: (n,z); z: size of embedding of 1 datapt
+
+
+    # CALCULTAING WEIGHT COVARIANCE MATRIX
+    lamb = 1.0 # default value in the code on ALIEN github repo 
+    weight_covariance = np.linalg.inv(
+        # original, more complex code:
+        # sum_except(X[..., None, :] * X[..., :, None], (-1, -2)) + lamb * np.eye(X.shape[-1])
+
+        # simplified code, should suffice for our purposes:
+        X[:, None, :] * X[:, :, None] + lamb * np.eye(X.shape[-1])
+    )
+
+    # CONVERT WEIGHT COVARIANCE MATRIX TO LINEAR COVARIANCE MATRIX (NEED TO RESEARCH MORE ABOUT THEM)
+    # initialize cov matrix. Shape is (n,n); n: number of data points
+
+    # original line of code
+    # cov = np.empty((*X.shape[:-2], X.shape[-2], X.shape[-2]))
+    # simplified for better readability
+    cov = np.empty(X.shape[0], X.shape[0])
+
+    # Below, the implementation is being done in blocks, as its heavy on memory
+    block_size = 1000 # size of the block to compute once
+    for i_0, i_1 in ranges(len(X), block_size):
+        for j_0, j_1 in ranges(len(X), block_size):
+            cov[i_0:i_1, j_0:j_1] = (
+                np.dot(X[i_0:i_1, None, :], weight_covariance)
+                * np.asarray(X)[None, j_0:j_1, :]
+            ).sum(axis=-1)
+    # now cov is the linear covariance matrix, using which we can compute which batch to select
+
+    # for now, just using the variance values (diagonal elements) for each datapoint
+    variances = np.diag(cov) # shape: (n,)
+
+    return variances
 
 def uncertainty_sampling(data, model):
     ''' 
