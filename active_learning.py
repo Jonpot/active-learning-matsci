@@ -91,7 +91,7 @@ def COVLAP(model, data):
             ).sum(axis=-1)
     # now cov is the linear covariance matrix, using which we can compute which batch to select
 
-    # for now, just using the variance values (diagonal elements) for each datapoint
+    # for now, just returning the variance values (diagonal elements) for each datapoint
     variances = np.diag(cov) # shape: (n,)
 
     return variances
