@@ -29,6 +29,30 @@ def COVDROP(model, data, num_samples=100):
 
 # BELOW IS COVLAP IMPLEMENTATION AND RELATED FUNCTIONS
 
+# necessary funcs
+def isint(i):
+    """Check whether i can be cast to an integer
+
+    Args:
+        i (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+    try:
+        return int(i) == i
+    except (ValueError, TypeError):
+        return False
+
+def axes_except(X, non_axes):
+    if isint(non_axes):
+        non_axes = (non_axes,)
+    non_axes = tuple(a % X.ndim for a in non_axes)
+    return tuple(a for a in range(X.ndim) if a not in non_axes)
+
+def sum_except(X, non_axes):
+    return X.sum(axis=axes_except(X, non_axes))
+
 def ranges(*args):
     """
     Takes arguments ([start,] stop, step).
@@ -70,7 +94,7 @@ def COVLAP(model, data):
         # sum_except(X[..., None, :] * X[..., :, None], (-1, -2)) + lamb * np.eye(X.shape[-1])
 
         # simplified code, should suffice for our purposes:
-        X[:, None, :] * X[:, :, None] + lamb * np.eye(X.shape[-1])
+        np.sum(X[:, None, :] * X[:, :, None], axis = 0) + lamb * np.eye(X.shape[-1])
     )
 
     # CONVERT WEIGHT COVARIANCE MATRIX TO LINEAR COVARIANCE MATRIX (NEED TO RESEARCH MORE ABOUT THEM)
@@ -79,7 +103,7 @@ def COVLAP(model, data):
     # original line of code
     # cov = np.empty((*X.shape[:-2], X.shape[-2], X.shape[-2]))
     # simplified for better readability
-    cov = np.empty(X.shape[0], X.shape[0])
+    cov = np.empty((X.shape[0], X.shape[0]))
 
     # Below, the implementation is being done in blocks, as its heavy on memory
     block_size = 1000 # size of the block to compute once
