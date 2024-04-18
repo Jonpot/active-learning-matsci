@@ -379,9 +379,6 @@ class EfficientNet3DEncoder(EfficientNet3D):
         super().load_state_dict(state_dict, **kwargs)
 
 
-
-
-
 class EfficientAutoEncoder3D(EfficientNet3D):
     """EfficientNet AutoEncoder model.
        Most easily loaded with the .from_name or .from_pretrained methods.
@@ -626,9 +623,14 @@ class EfficientUnet3D(SegmentationModel):
         in_channels: int = 3,
         classes: int = 1,
         activation: Optional[Union[str, callable]] = None,
+        dropout: Optional[dict] = None,
         aux_params: Optional[dict] = None,
     ):
         super().__init__()
+        if dropout is None:
+            dropout = {'decoder_dropout': None, 'head_dropout': None}
+        decoder_dropout = dropout['decoder_dropout']
+        head_dropout = dropout['head_dropout']
 
         self.encoder = get_encoder(
             encoder_name,
@@ -645,6 +647,7 @@ class EfficientUnet3D(SegmentationModel):
             use_batchnorm=decoder_use_batchnorm,
             center=True if encoder_name.startswith("vgg") else False,
             attention_type=decoder_attention_type,
+            dropout=decoder_dropout
         )
 
         self.segmentation_head = SegmentationHead(
@@ -652,6 +655,7 @@ class EfficientUnet3D(SegmentationModel):
             out_channels=classes,
             activation=activation,
             kernel_size=3,
+            dropout=head_dropout,
         )
 
         if aux_params is not None:

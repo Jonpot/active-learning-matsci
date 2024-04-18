@@ -17,6 +17,7 @@ class EfficientUnet3DDecoder(nn.Module):
             use_batchnorm=True,
             attention_type=None,
             center=False,
+            dropout=None,
     ):
         super().__init__()
 
@@ -44,7 +45,7 @@ class EfficientUnet3DDecoder(nn.Module):
             self.center = nn.Identity()
 
         # combine decoder keyword arguments
-        kwargs = dict(use_batchnorm=use_batchnorm, attention_type=attention_type)
+        kwargs = dict(use_batchnorm=use_batchnorm, attention_type=attention_type, dropout=dropout)
         blocks = [
             UnetDecoderBlock(in_ch, skip_ch, out_ch, **kwargs)
             for in_ch, skip_ch, out_ch in zip(in_channels, skip_channels, out_channels)

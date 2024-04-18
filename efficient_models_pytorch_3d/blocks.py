@@ -158,8 +158,11 @@ class UnetDecoderBlock(nn.Module):
             out_channels,
             use_batchnorm=True,
             attention_type=None,
+            dropout=None,
     ):
         super().__init__()
+
+        self.dropout = nn.Dropout3d(dropout) if dropout else nn.Identity()
 
         self.conv1 = PreActivatedConv3dReLU(
             in_channels + skip_channels,
@@ -182,9 +185,11 @@ class UnetDecoderBlock(nn.Module):
         x = F.interpolate(x, scale_factor=2, mode="nearest")
         if skip is not None:
             x = torch.cat([x, skip], dim=1)
+            x = self.dropout(x)
             x = self.attention1(x)
         x = self.conv1(x)
         x = self.conv2(x)
+        x = self.dropout(x)
         x = self.attention2(x)
         return x
 
