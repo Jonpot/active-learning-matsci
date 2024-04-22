@@ -10,6 +10,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from sklearn.model_selection import train_test_split
 
 from pytorch_lightning import LightningDataModule, LightningModule, Trainer, seed_everything
+from pytorch_lightning import Callback
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
@@ -220,12 +221,15 @@ class SurrogateModule(LightningModule):
         self.sch_patience = hyperparameters['sch_patience']
 
         self.heuristic = hyperparameters['heuristic']
+        self.training_epochs = hyperparameters['training_epochs']
         self.query_size = hyperparameters['query_size']
         self.mc_iterations = hyperparameters['mc_iterations']
         self.active_count = 0
         
         self.loss = hyperparameters['loss']
         self.score = hyperparameters['score']
+        self.success_count = 0  # Initialize the success counter
+        self.threshold = 0.05  # Set the percentage threshold
 
     def get_model(self):
         # TODO: Maybe add drop_connect_rate option
@@ -255,7 +259,7 @@ class SurrogateModule(LightningModule):
     def step(self, batch, batch_idx):
         x, (stress_field, strain_field) = batch
         masks = self.model(x)
-        
+
         stress_mask = masks[:,0,:,:,:].unsqueeze(1)
         stress_loss = self.loss(stress_mask, stress_field)
         stress_score = self.score(stress_mask.flatten(), stress_field.flatten())
@@ -263,9 +267,20 @@ class SurrogateModule(LightningModule):
         strain_mask = masks[:,1,:,:,:].unsqueeze(1)
         strain_loss = self.loss(strain_mask, strain_field)
         strain_score = self.score(strain_mask.flatten(), strain_field.flatten())
-        
+
         loss = stress_loss + strain_loss
         score = (stress_score + strain_score) / 2
+
+        # Calculate success metric
+        max_stress_pred = stress_mask.max().item()
+        max_stress_target = stress_field.max().item()
+        max_strain_pred = strain_mask.max().item()
+        max_strain_target = strain_field.max().item()
+
+        # Check if the maximum predictions are within the threshold of the maximum targets
+        if abs(max_stress_pred - max_stress_target) / max_stress_target <= self.threshold and \
+        abs(max_strain_pred - max_strain_target) / max_strain_target <= self.threshold:
+            self.success_count += 1
 
         if self.plot:
             self.plot_fields(stress_field, stress_mask, x)
@@ -292,8 +307,17 @@ class SurrogateModule(LightningModule):
     
     def on_validation_end(self):
         if not self.trainer.sanity_checking:
+            if (self.current_epoch + 1) % self.training_epochs != 0:
+                return  
+            
             self.active_step()
             self.active_count += 1
+
+            train_size = len(self.datamodule.active_dataset)
+            self.logger.experiment.add_scalar('train_size', train_size, self.current_epoch)
+            self.logger.experiment.add_scalar('success_count', self.success_count, self.current_epoch)
+
+            self.success_count = 0
            
     def test_step(self, batch, batch_idx):
         loss, score = self.step(batch, batch_idx)
@@ -459,14 +483,18 @@ class Model:
     def setup(self):
         self.model_args = {'model_info': self.model_info, 'hyperparameters': self.hyperparameters}
 
-        ## Setup Devices to Use
+        # Setup Devices to Use
         if self.device is None and torch.cuda.is_available():
             self.device = find_usable_cuda_devices()
         else:
             self.device = [self.device] if self.device is not None else None
 
+        # Setup Random Seed and Precision
         seed_everything(42, workers=True)
         torch.set_float32_matmul_precision('medium')
+
+        # Setup Log Directory
+        self.log_dir = f"surrogate_model_dir/train_logs/{self.dataset}"
         
         # Load Bus
         self.bus = sf.Bus.from_zip_npz(self.dfs_zip)
@@ -508,8 +536,7 @@ class Model:
         else:
             model = SurrogateModule(**self.model_args)
 
-        logger = TensorBoardLogger(f"surrogate_model_dir/train_logs", name=f"{self.dataset}",
-                                   default_hp_metric=False)
+        logger = TensorBoardLogger(self.log_dir, name=f"{self.massif_sample}", default_hp_metric=False)
 
         if self.distributed and torch.cuda.is_available():
             strategy = DDPStrategy(find_unused_parameters=True)
@@ -518,17 +545,16 @@ class Model:
 
         checkpoint_callback = ModelCheckpoint(save_top_k=1, monitor=f"val_loss({self.loss.__class__.__name__})", mode='min')
         early_stop_callback = EarlyStopping(monitor=f"val_loss({self.loss.__class__.__name__})", mode='min')
-        reset_checkpoint = ResetCallback(copy.deepcopy(model.state_dict()))
+        reset_checkpoint_callback = ResetCallback(copy.deepcopy(model.state_dict()))
 
-        callbacks = [checkpoint_callback, reset_checkpoint]
+        callbacks = [checkpoint_callback, reset_checkpoint_callback]
         if self.early_stopping:
             callbacks.append(early_stop_callback)
 
         trainer = Trainer(
             logger=logger,
             max_epochs=self.active_learning_steps * self.training_epochs,
-            check_val_every_n_epoch=self.training_epochs,
-            reload_dataloaders_every_n_epochs=self.training_epochs,
+            reload_dataloaders_every_n_epochs=1,
             enable_checkpointing=True,
             accelerator='gpu' if torch.cuda.is_available() else 'cpu',
             strategy=strategy,
@@ -595,7 +621,7 @@ def main():
     surrogate_ckpt = None  # 'surrogate_model_dir/unet_scse_pretraining_ct_scans_sample_0.ckpt' or None
     
     # Training Details
-    distributed = True
+    distributed = False
     persistent_workers = True if distributed else False
     early_stopping = False
     mixed_precision = True
@@ -609,9 +635,9 @@ def main():
     validation_size = 500  # Validation data size, float (0.0 to 1.0), or int (number of samples)
     test_size = 250  # Test data size, float (0.0 to 1.0), or int (number of samples)
     active_learning_steps = 25  # Number of active learning steps to perform queries
-    training_epochs = 1  # Number of epochs to train the model for each active learning step
+    training_epochs = 25  # Number of epochs to train the model for each active learning step
     mc_sampling_iterations = 5  # Number of Monte Carlo iterations for uncertainty estimation
-    query_size = 40  # Total queries = active_learning_steps * query_size = 10 * 100 = 1000
+    query_size = 40  # Total queries = active_learning_steps * query_size = 25 * 40 = 1000
     
     # Model Hyperparameters
     loss = MSELoss()
