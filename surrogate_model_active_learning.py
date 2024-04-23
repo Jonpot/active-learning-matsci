@@ -30,6 +30,8 @@ from zipfile import ZipFile
 import numpy as np
 from vedo import Volume, Text2D
 from slicer import Slicer3DTwinPlotter
+from multiprocessing import Process
+from collections.abc import Iterable
 from tqdm import tqdm
 import sys
 import os
@@ -230,8 +232,11 @@ class SurrogateModule(LightningModule):
         self.score = hyperparameters['score']
         self.score_name = self.score.__class__.__name__
 
-        self.success_count = 0  # Initialize the success counter
-        self.success_threshold = hyperparameters['success_threshold']
+        self.success_threshold_1 = hyperparameters['success_threshold_1']
+        self.success_threshold_2 = hyperparameters['success_threshold_2']
+
+        self.success_count_1 = 0  # Initialize the success counter
+        self.success_count_2 = 0  # Initialize the success counter
         self.validation_size = self.datamodule.val_dataloader().dataset.__len__()
         
     def get_model(self):
@@ -284,12 +289,22 @@ class SurrogateModule(LightningModule):
 
                 # Check if the maximum predictions are within the threshold of the maximum targets
                 # Initialize a temporary count for this sample
+                stress_score = abs(max_stress_pred - max_stress_target) / max_stress_target
+                strain_score = abs(max_strain_pred - max_strain_target) / max_strain_target
+
                 temp_count = 0
-                if abs(max_stress_pred - max_stress_target) / max_stress_target <= self.success_threshold:
+                if stress_score <= self.success_threshold_1:
                     temp_count += 1
-                if abs(max_strain_pred - max_strain_target) / max_strain_target <= self.success_threshold:
+                if strain_score <= self.success_threshold_1:
                     temp_count += 1
-                self.success_count += temp_count / 2
+                self.success_count_1 += temp_count / 2
+
+                temp_count = 0
+                if stress_score <= self.success_threshold_2:
+                    temp_count += 1
+                if strain_score <= self.success_threshold_2:
+                    temp_count += 1
+                self.success_count_2 += temp_count / 2
 
         if self.plot:
             self.plot_fields(stress_field, stress_mask, x)
@@ -325,13 +340,18 @@ class SurrogateModule(LightningModule):
             self.active_count += 1
 
             train_size = len(self.datamodule.active_dataset)
-            success_score = self.success_count / self.validation_size
+            success_score_1 = self.success_count_1 / self.validation_size
+            success_score_2 = self.success_count_2 / self.validation_size
 
             # Log 'train_size' and 'success_score' as separate scalars
             self.logger.experiment.add_scalar('train_size', train_size, self.current_epoch)
-            self.logger.experiment.add_scalar('success_score', success_score, self.current_epoch)
+            self.logger.experiment.add_scalar(f"success_score({self.success_threshold_1:.2f})",
+                                              success_score_1, self.current_epoch)
+            self.logger.experiment.add_scalar(f"success_score({self.success_threshold_2:.2f})",
+                                              success_score_2, self.current_epoch)
 
-            self.success_count = 0
+            self.success_count_1 = 0
+            self.success_count_2 = 0
 
             #self.logger.experiment.add_scalar('uncertainty', uncertainty, self.current_epoch)
            
@@ -485,7 +505,8 @@ class Heuristics(CombineHeuristics):
 
         Return both the rank and associated uncertainties.
         """
-        return self.get_ranks(predictions)[0], self.get_ranks(predictions)[1]
+        scores = self.get_ranks(predictions)
+        return scores[0], scores[1]
 
 
 class Model:
@@ -677,11 +698,11 @@ class Model:
         return f'{base_version}_{max(version_numbers) + 1}'
 
 
-def main():
+def main(device=None, params=None):
     # TODO: Params loader
     # Arguments
     dataset = 'ct_scans'
-    massif_sample = 'stratified_0'  # Which MASSIF sample to use with active_learning and test
+    massif_sample = 'stratified_0'  # Which MASSIF sample to use with active_learning and test. 'stratified_0' or 'random_0'
     include = 'all'  # 'all' or ('TTT-AM-P-1-62',...) to use with get_stress_fields
     working_dataset_size = None  # None, float (0.0 to 1.0), or int (number of samples)
     num_workers = 12  # Select number of CPU resources for data loading
@@ -694,8 +715,8 @@ def main():
     freeze_encoder = False  # True or False
     decoder = 'unet'  # 'unet' or 'unet++'
     decoder_attention = 'scse'  # None, 'se', or 'scse'
-    decoder_dropout = 0.5  # None or float
-    head_dropout = 0.5  # None or float
+    decoder_dropout = 0.4  # None or float
+    head_dropout = 0.3  # None or float
     num_channels = 1  # 1 or 3
     num_classes = 2  # int (number of output masks)
     surrogate_ckpt = None  # None or 'surrogate_model_dir/unet_scse_pretraining_ct_scans_sample_0.ckpt'
@@ -705,7 +726,7 @@ def main():
     persistent_workers = True if distributed else False
     early_stopping = False
     mixed_precision = True
-    device = None  # None or select GPU: 0, 1, 2, 3
+    device = device  # None or select GPU: 0, 1, 2, 3
 
     # Active Learning Hyperparameters
     heuristic = 'variance'  # 'variance', 'random', TODO: 'laplace_approximation', TODO: multiple weighted heuristics
@@ -720,7 +741,8 @@ def main():
     # Model Hyperparameters
     loss = MSELoss()
     score = R2Score()
-    success_threshold = 0.05  # Percentage threshold for success metric
+    success_threshold_1 = 0.05  # Percentage threshold for success metric
+    success_threshold_2 = 0.1  # Percentage threshold for success metric
     optimizer_name = 'AdamW'
     batch_size = 6
     lr = 0.0022980
@@ -753,23 +775,20 @@ def main():
     hyperparameters = {'heuristic': heuristic, 'active_learning_steps': active_learning_steps,
                        'training_epochs': training_epochs, 'mc_iterations': mc_sampling_iterations,
                        'query_size': query_size, 'loss': loss, 'score': score,
-                       'success_threshold': success_threshold, 'optimizer': optimizer_name,
-                       'batch_size': batch_size,'lr': lr, 'sch_factor': sch_factor,
-                       'sch_patience': sch_patience}
+                       'success_threshold_1': success_threshold_1, 'success_threshold_2': success_threshold_2,
+                       'optimizer': optimizer_name, 'batch_size': batch_size,'lr': lr,
+                       'sch_factor': sch_factor, 'sch_patience': sch_patience}
     
     # Main
     model = Model(dataset_info, model_info, hyperparameters)
     if task == 'active_learning': model.active_learning()
     elif task == 'test': model.test()
     else: print("Invalid task"); sys.exit()
-    
 
-if __name__ == "__main__":
-    # TODO: Params loader
-    start_time = time.time()
+def worker(device, params):
+    main(device, params)
 
-    main()
-
+def finish_time(start_time):
     duration = round(((time.time() - start_time))/60, 2)
 
     if duration >= 60:
@@ -780,4 +799,26 @@ if __name__ == "__main__":
     timestamp = datetime.now().strftime("%m-%d-%Y at %H:%M:%S")
 
     print(f"\nFinished in {duration} on {timestamp}")
+
+
+if __name__ == "__main__":
+    # TODO: Params loader
+    devices = None  # None or iterable of gpu devices (0, 1, 2, 3)
+    params_list = None # None or iterable of parameter sets
+
+    start_time = time.time()
+
+    if isinstance(devices, Iterable):
+        processes = []
+        for device, params in zip(devices, params_list):
+            p = Process(target=worker, args=(device, params))
+            p.start()
+            processes.append(p)
+
+        for p in processes:
+            p.join()
+    else:
+        main(params_list=params_list)
+
+    finish_time(start_time)
     
