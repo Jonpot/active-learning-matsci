@@ -10,7 +10,6 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from sklearn.model_selection import train_test_split
 
 from pytorch_lightning import LightningDataModule, LightningModule, Trainer, seed_everything
-from pytorch_lightning import Callback
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
@@ -32,16 +31,15 @@ import numpy as np
 from vedo import Volume, Text2D
 from slicer import Slicer3DTwinPlotter
 from tqdm import tqdm
-import types
 import sys
-import copy
+import os
 import re
+import copy
+import itertools
+import structlog
 from datetime import datetime
 import time
-import itertools
-
-import structlog
-log = structlog.get_logger("PL testing")
+log = structlog.get_logger("Active Learning Surrogate Model")
 
 
 class NPZArchive:
@@ -227,12 +225,17 @@ class SurrogateModule(LightningModule):
         self.active_count = 0
         
         self.loss = hyperparameters['loss']
-        self.score = hyperparameters['score']
-        self.success_count = 0  # Initialize the success counter
-        self.threshold = 0.05  # Set the percentage threshold
+        self.loss_name = self.loss.__class__.__name__
 
+        self.score = hyperparameters['score']
+        self.score_name = self.score.__class__.__name__
+
+        self.success_count = 0  # Initialize the success counter
+        self.success_threshold = hyperparameters['success_threshold']
+        self.validation_size = self.datamodule.val_dataloader().dataset.__len__()
+        
     def get_model(self):
-        # TODO: Maybe add drop_connect_rate option
+        # TODO: Add drop_connect_rate option
         if self.decoder == 'unet':
             model = EfficientUnet3D(self.name,
                                     encoder_weights=self.encoder_ckpt,
@@ -256,7 +259,7 @@ class SurrogateModule(LightningModule):
     def forward(self, x):
         return self.model(x)
     
-    def step(self, batch, batch_idx):
+    def step(self, batch, batch_idx, validation=False):
         x, (stress_field, strain_field) = batch
         masks = self.model(x)
 
@@ -271,16 +274,22 @@ class SurrogateModule(LightningModule):
         loss = stress_loss + strain_loss
         score = (stress_score + strain_score) / 2
 
-        # Calculate success metric
-        max_stress_pred = stress_mask.max().item()
-        max_stress_target = stress_field.max().item()
-        max_strain_pred = strain_mask.max().item()
-        max_strain_target = strain_field.max().item()
+        if validation:
+            # Check if the maximum predictions are within the threshold of the maximum targets
+            for i in range(x.size(0)):  # iterate over samples in the batch
+                max_stress_pred = stress_mask[i].max().item()
+                max_stress_target = stress_field[i].max().item()
+                max_strain_pred = strain_mask[i].max().item()
+                max_strain_target = strain_field[i].max().item()
 
-        # Check if the maximum predictions are within the threshold of the maximum targets
-        if abs(max_stress_pred - max_stress_target) / max_stress_target <= self.threshold and \
-        abs(max_strain_pred - max_strain_target) / max_strain_target <= self.threshold:
-            self.success_count += 1
+                # Check if the maximum predictions are within the threshold of the maximum targets
+                # Initialize a temporary count for this sample
+                temp_count = 0
+                if abs(max_stress_pred - max_stress_target) / max_stress_target <= self.success_threshold:
+                    temp_count += 1
+                if abs(max_strain_pred - max_strain_target) / max_strain_target <= self.success_threshold:
+                    temp_count += 1
+                self.success_count += temp_count / 2
 
         if self.plot:
             self.plot_fields(stress_field, stress_mask, x)
@@ -290,40 +299,47 @@ class SurrogateModule(LightningModule):
 
     def training_step(self, batch, batch_idx):
         if self.datamodule.has_labelled_data:
+            self.disable_dropout(self.model)
+
             loss, score = self.step(batch, batch_idx)
 
-            self.log_dict({f"train_loss({self.loss.__class__.__name__})": loss,
-                          f"train_score({self.score.__class__.__name__})": score},
+            self.log_dict({f"train_loss({self.loss_name})": loss,
+                          f"train_score({self.score_name})": score},
                           batch_size=self.batch_size, on_epoch=True, on_step=False, sync_dist=True)
-            
+
             return loss
 
     def validation_step(self, batch, batch_idx):
-        loss, score = self.step(batch, batch_idx)
+        loss, score = self.step(batch, batch_idx, validation=True)
 
-        self.log_dict({f"val_loss({self.loss.__class__.__name__})": loss,
-                       f"val_score({self.score.__class__.__name__})": score},
-                       batch_size=self.batch_size, on_epoch=True, on_step=False, sync_dist=True)
+        self.log_dict({f"val_loss({self.loss_name})": loss,
+                      f"val_score({self.score_name})": score},
+                      batch_size=self.batch_size, on_epoch=True, on_step=False, sync_dist=True)
     
     def on_validation_end(self):
         if not self.trainer.sanity_checking:
             if (self.current_epoch + 1) % self.training_epochs != 0:
                 return  
-            
+
             self.active_step()
             self.active_count += 1
 
             train_size = len(self.datamodule.active_dataset)
+            success_score = self.success_count / self.validation_size
+
+            # Log 'train_size' and 'success_score' as separate scalars
             self.logger.experiment.add_scalar('train_size', train_size, self.current_epoch)
-            self.logger.experiment.add_scalar('success_count', self.success_count, self.current_epoch)
+            self.logger.experiment.add_scalar('success_score', success_score, self.current_epoch)
 
             self.success_count = 0
+
+            #self.logger.experiment.add_scalar('uncertainty', uncertainty, self.current_epoch)
            
     def test_step(self, batch, batch_idx):
         loss, score = self.step(batch, batch_idx)
         
-        self.log_dict({f"test_loss({self.loss.__class__.__name__})": loss,
-                       f"test_score({self.score.__class__.__name__})": score},
+        self.log_dict({f"test_loss({self.loss_name})": loss,
+                       f"test_score({self.score_name})": score},
                        batch_size=self.batch_size, sync_dist=True)
     
     def predict_step(self, batch, batch_idx):
@@ -385,6 +401,8 @@ class SurrogateModule(LightningModule):
                 to_label = self.heuristic(combined_predictions)
                 if len(to_label) > 0:
                     self.active_dataset.label(to_label[: self.query_size])
+                    # Calculate average uncertainty
+                    #average_uncertainty = np.mean(uncertainties)
                     return
         self.should_stop = True
     
@@ -392,7 +410,7 @@ class SurrogateModule(LightningModule):
         optimizer = getattr(optim, self.optimizer_name)(self.model.parameters(), lr=self.lr)
         lr_scheduler = {'scheduler': ReduceLROnPlateau(optimizer, mode='min',
                                      factor=self.sch_factor, patience=self.sch_patience),
-                        'monitor': f"val_loss({self.loss.__class__.__name__})"}
+                        'monitor': f"val_loss({self.loss_name})"}
         return [optimizer], [lr_scheduler]
     
     @staticmethod
@@ -402,6 +420,13 @@ class SurrogateModule(LightningModule):
         for m in model.modules():
             if isinstance(m, torch.nn.BatchNorm3d):
                 m.eval()  # Set BatchNorm3d layers to evaluation mode
+
+    @staticmethod
+    def disable_dropout(model):
+        # Disable the dropout layers during training
+        for m in model.modules():
+            if isinstance(m, torch.nn.Dropout3d):
+                m.eval()  # Set Dropout3d layers to evaluation mode
 
     @staticmethod
     def plot_fields(target, mask, icon):
@@ -450,6 +475,19 @@ class SurrogateModule(LightningModule):
         plt.interactive().close()
 
 
+# TODO: Figure out how to pull out the actual uncertainties as well to keep track of the average
+class Heuristics(CombineHeuristics):
+    def __init__(self, heuristics, weights):
+        super(Heuristics, self).__init__(heuristics, weights)
+    
+    def __call__(self, predictions):
+        """Rank the predictions according to their uncertainties.
+
+        Return both the rank and associated uncertainties.
+        """
+        return self.get_ranks(predictions)[0], self.get_ranks(predictions)[1]
+
+
 class Model:
     def __init__(self, dataset_info, model_info, hyperparameters):
         super(Model, self).__init__()
@@ -482,6 +520,9 @@ class Model:
 
     def setup(self):
         self.model_args = {'model_info': self.model_info, 'hyperparameters': self.hyperparameters}
+
+        self.loss_name = self.loss.__class__.__name__
+        self.score_name = self.score.__class__.__name__
 
         # Setup Devices to Use
         if self.device is None and torch.cuda.is_available():
@@ -536,42 +577,60 @@ class Model:
         else:
             model = SurrogateModule(**self.model_args)
 
-        logger = TensorBoardLogger(self.log_dir, name=f"{self.massif_sample}", default_hp_metric=False)
+        self.hyperparameters['heuristic'] = self.heuristic
+        version = f"{self.massif_sample}_{self.heuristic}"
+        version = self.get_next_version('surrogate_model_dir/train_logs/active_learning', version)
+
+        logger = TensorBoardLogger('surrogate_model_dir/train_logs',
+                                   name='active_learning',
+                                   version=version,
+                                   default_hp_metric=False)
 
         if self.distributed and torch.cuda.is_available():
             strategy = DDPStrategy(find_unused_parameters=True)
         else:
             strategy = 'auto'
 
-        checkpoint_callback = ModelCheckpoint(save_top_k=1, monitor=f"val_loss({self.loss.__class__.__name__})", mode='min')
-        early_stop_callback = EarlyStopping(monitor=f"val_loss({self.loss.__class__.__name__})", mode='min')
-        reset_checkpoint_callback = ResetCallback(copy.deepcopy(model.state_dict()))
+        filename = f"validation_checkpoint_{{epoch:02d}}_{{val_score({self.score_name}):.2f}}"
+        validation_checkpoint_callback = ModelCheckpoint(filename=filename,
+                                                         save_top_k=1,
+                                                         monitor=f"val_score({self.score_name})",
+                                                         mode='max')
 
-        callbacks = [checkpoint_callback, reset_checkpoint_callback]
+        #success_checkpoint_callback = ModelCheckpoint(filename='success_checkpoint_{epoch:02d}-{success_count:02d}',
+        #                                              save_top_k=1,
+        #                                              monitor=f"val_loss({self.loss_name})",
+        #                                              mode='max',
+        #                                              state_key='success_checkpoint')
+        
+        reset_checkpoint_callback = ResetCallback(copy.deepcopy(model.state_dict()))
+        early_stop_callback = EarlyStopping(monitor=f"val_loss({self.loss_name})", mode='min')
+        
+        callbacks = [validation_checkpoint_callback, reset_checkpoint_callback]
         if self.early_stopping:
             callbacks.append(early_stop_callback)
 
-        trainer = Trainer(
-            logger=logger,
-            max_epochs=self.active_learning_steps * self.training_epochs,
-            reload_dataloaders_every_n_epochs=1,
-            enable_checkpointing=True,
-            accelerator='gpu' if torch.cuda.is_available() else 'cpu',
-            strategy=strategy,
-            gpus=self.device,
-            precision=16 if self.mixed else 32,
-            callbacks=callbacks)
+        trainer = Trainer(logger=logger,
+                          max_epochs=self.active_learning_steps * self.training_epochs,
+                          reload_dataloaders_every_n_epochs=1,
+                          enable_checkpointing=True,
+                          accelerator='gpu' if torch.cuda.is_available() else 'cpu',
+                          strategy=strategy,
+                          devices=self.device,
+                          precision='16-mixed' if self.mixed else 32,
+                          callbacks=callbacks)
         
         trainer.fit(model, datamodule=datamodule)
         
-        best_model_path = Path(checkpoint_callback.best_model_path)
-        best_epoch_search = re.search('epoch=(.*)-', best_model_path.as_posix())
+        best_model_path = Path(validation_checkpoint_callback.best_model_path)
+        best_epoch_search = re.search('epoch=(\d+)', best_model_path.as_posix())
         best_epoch = int(best_epoch_search.group(1))
         
-        best_val_score = checkpoint_callback.best_model_score.item()
-        best_test_score = trainer.test(ckpt_path='best', datamodule = datamodule)[0][f"test_score({self.score.__class__.__name__})"]
+        best_val_score = validation_checkpoint_callback.best_model_score.item()
+        best_test_score = trainer.test(ckpt_path='best', datamodule = datamodule)[0][f"test_score({self.score_name})"]
+        #best_success_score = success_checkpoint_callback.best_model_score.item()
        
-        metrics = {'best_epoch': best_epoch, 'val_score': best_val_score, 'test_score': best_test_score}
+        metrics = {'best_epoch': best_epoch, 'validation_score': best_val_score, 'test_score': best_test_score}#, 'success_score': best_success_score}
         trainer.logger.log_hyperparams(self.hyperparameters, metrics)
 
     def test(self):
@@ -586,15 +645,36 @@ class Model:
 
         logger = TensorBoardLogger(f"surrogate_model_dir/test_logs",
                                    name=f"{self.dataset}",
+                                   version=f"{self.massif_sample}_{self.heuristic}",
                                    default_hp_metric=False)
 
-        trainer = Trainer(
-            logger=logger,
-            accelerator='gpu' if torch.cuda.is_available() else 'cpu',
-            devices=1,
-            num_nodes=1)
+        trainer = Trainer(logger=logger,
+                          accelerator='gpu' if torch.cuda.is_available() else 'cpu',
+                          devices=1,
+                          num_nodes=1)
         
         trainer.test(model, datamodule=datamodule)
+
+    @staticmethod
+    def get_next_version(base_dir, base_version):
+        # Create the directory if it doesn't exist
+        base_dir = Path(base_dir)
+        base_dir.mkdir(parents=True, exist_ok=True)
+
+        # Get a list of all existing versions
+        existing_versions = os.listdir(base_dir)
+
+        # Extract the numbers from the existing versions that match the base version
+        version_numbers = [int(re.search(f'{base_version}_(\d+)', version).group(1)) 
+                           for version in existing_versions 
+                           if re.match(f'{base_version}_\d+', version)]
+
+        # If no matching versions were found, start at 0
+        if not version_numbers:
+            return f'{base_version}_0'
+
+        # Otherwise, return the base version followed by the next available number
+        return f'{base_version}_{max(version_numbers) + 1}'
 
 
 def main():
@@ -602,46 +682,45 @@ def main():
     # Arguments
     dataset = 'ct_scans'
     massif_sample = 'stratified_0'  # Which MASSIF sample to use with active_learning and test
-    include = 'all'  # 'all' or ('TTT-AM-P-1-62',) to use with get_stress_fields
+    include = 'all'  # 'all' or ('TTT-AM-P-1-62',...) to use with get_stress_fields
     working_dataset_size = None  # None, float (0.0 to 1.0), or int (number of samples)
-    num_workers = 12  # Select number of CPU resources
+    num_workers = 12  # Select number of CPU resources for data loading
     plot_volumes = False  # True or False
 
     task = 'active_learning'  # 'active_learning', 'test'
     model_type = '3D'  # 2D or 3D
     model_name = 'efficientnet-b0'  # '*-b0', '*-b1', '*-b2', '*-b3', '*-b4', '*-b5', '*-b6', or '*-b7'
-    encoder_ckpt = None  # 'autoencoder/ae_pretraining_ct_scans_all.ckpt' or None
+    encoder_ckpt = None  # None or 'autoencoder/ae_pretraining_ct_scans_all.ckpt'
     freeze_encoder = False  # True or False
     decoder = 'unet'  # 'unet' or 'unet++'
     decoder_attention = 'scse'  # None, 'se', or 'scse'
-    decoder_dropout = 0.3  # None or float
-    head_dropout = 0.2  # None or float
+    decoder_dropout = 0.5  # None or float
+    head_dropout = 0.5  # None or float
     num_channels = 1  # 1 or 3
     num_classes = 2  # int (number of output masks)
-    surrogate_ckpt = None  # 'surrogate_model_dir/unet_scse_pretraining_ct_scans_sample_0.ckpt' or None
+    surrogate_ckpt = None  # None or 'surrogate_model_dir/unet_scse_pretraining_ct_scans_sample_0.ckpt'
     
     # Training Details
     distributed = False
     persistent_workers = True if distributed else False
     early_stopping = False
     mixed_precision = True
-    device = 0  # Select GPU: 0, 1, 2, 3
-    
-    training_info = {'distributed': distributed, 'mixed_precision': mixed_precision, 'early_stopping': early_stopping, 'device': device}
+    device = None  # None or select GPU: 0, 1, 2, 3
 
     # Active Learning Hyperparameters
     heuristic = 'variance'  # 'variance', 'random', TODO: 'laplace_approximation', TODO: multiple weighted heuristics
     labelled_train_size = 750  # Training data size to label initially, float (0.0 to 1.0), or int (number of samples)
     validation_size = 500  # Validation data size, float (0.0 to 1.0), or int (number of samples)
     test_size = 250  # Test data size, float (0.0 to 1.0), or int (number of samples)
-    active_learning_steps = 25  # Number of active learning steps to perform queries
-    training_epochs = 25  # Number of epochs to train the model for each active learning step
-    mc_sampling_iterations = 5  # Number of Monte Carlo iterations for uncertainty estimation
+    active_learning_steps = 25  # Number of active learning steps to perform for query selection
+    training_epochs = 1  # Number of epochs to train the model for each active learning step
+    mc_sampling_iterations = 10  # Number of Monte Carlo iterations for uncertainty estimation
     query_size = 40  # Total queries = active_learning_steps * query_size = 25 * 40 = 1000
     
     # Model Hyperparameters
     loss = MSELoss()
     score = R2Score()
+    success_threshold = 0.05  # Percentage threshold for success metric
     optimizer_name = 'AdamW'
     batch_size = 6
     lr = 0.0022980
@@ -655,21 +734,28 @@ def main():
     
     # Dictionary Setup
     dataset_info = {'dataset': dataset, 'dfs_zip': dfs_zip, 'samples_dir': samples_dir,
-                    'massif_sample': massif_sample, 'include': include, 'working_dataset_size': working_dataset_size,
-                    'labelled_train_size': labelled_train_size, 'validation_size': validation_size, 'test_size': test_size,
-                    'num_workers': num_workers, 'num_channels': num_channels, 'batch_size': batch_size,
+                    'massif_sample': massif_sample, 'include': include,
+                    'working_dataset_size': working_dataset_size, 'labelled_train_size': labelled_train_size,
+                    'validation_size': validation_size, 'test_size': test_size,
+                    'num_channels': num_channels, 'batch_size': batch_size, 'num_workers': num_workers, 
                     'persistent_workers': persistent_workers if persistent_workers else None}
     
-    model_info = {'name': model_name, 'training_info': training_info, 'encoder_ckpt': encoder_ckpt,
+    training_info = {'distributed': distributed, 'mixed_precision': mixed_precision,
+                     'early_stopping': early_stopping, 'device': device}
+    
+    model_info = {'model_type': model_type, 'name': model_name, 'encoder_ckpt': encoder_ckpt,
                   'surrogate_ckpt': surrogate_ckpt, 'freeze_encoder': freeze_encoder,
                   'decoder': decoder, 'decoder_attention': decoder_attention, 
                   'dropout': {'decoder_dropout': decoder_dropout, 'head_dropout': head_dropout},
-                  'num_channels': num_channels,'num_classes': num_classes, 'plot': plot_volumes}
+                  'num_channels': num_channels,'num_classes': num_classes,
+                  'training_info': training_info, 'plot': plot_volumes}
     
-    hyperparameters = {'heuristic': heuristic, 'active_learning_steps': active_learning_steps, 'training_epochs': training_epochs,
-                       'mc_iterations': mc_sampling_iterations, 'query_size': query_size, 'loss': loss, 
-                       'score': score, 'optimizer': optimizer_name, 'batch_size': batch_size,'lr': lr,
-                       'sch_factor': sch_factor, 'sch_patience': sch_patience}
+    hyperparameters = {'heuristic': heuristic, 'active_learning_steps': active_learning_steps,
+                       'training_epochs': training_epochs, 'mc_iterations': mc_sampling_iterations,
+                       'query_size': query_size, 'loss': loss, 'score': score,
+                       'success_threshold': success_threshold, 'optimizer': optimizer_name,
+                       'batch_size': batch_size,'lr': lr, 'sch_factor': sch_factor,
+                       'sch_patience': sch_patience}
     
     # Main
     model = Model(dataset_info, model_info, hyperparameters)
