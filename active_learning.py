@@ -81,7 +81,7 @@ def COVLAP(model, data):
     # FOR SINGLE DATA POINT, MEANING 2 DIMENSIONAL FOR AN ARRAY OF DATAPOINTS. IF THIS NOT TRUE,
     # THEN WILL NEED THE ORIGINAL, MUCH MORE COMPLEX LOOKING CODE. 
 
-    # getting the embedding from the data 
+    # getting the embedding (or the field predictions) from the data 
     # shape of data assumed to be (n,f); n: number of data points, f: features in data points 
     X = model.embedding(data)
     # embedding assumed to be 2 dimensional, shape: (n,z); z: size of embedding of 1 datapt
@@ -91,28 +91,37 @@ def COVLAP(model, data):
     lamb = 1.0 # default value in the code on ALIEN github repo 
     weight_covariance = np.linalg.inv(
         # original, more complex code:
-        # sum_except(X[..., None, :] * X[..., :, None], (-1, -2)) + lamb * np.eye(X.shape[-1])
+        sum_except(X[..., None, :] * X[..., :, None], (-1, -2)) + lamb * np.eye(X.shape[-1])
 
         # simplified code, should suffice for our purposes:
-        np.sum(X[:, None, :] * X[:, :, None], axis = 0) + lamb * np.eye(X.shape[-1])
+        # np.sum(X[:, None, :] * X[:, :, None], axis = 0) + lamb * np.eye(X.shape[-1])
     )
 
     # CONVERT WEIGHT COVARIANCE MATRIX TO LINEAR COVARIANCE MATRIX (NEED TO RESEARCH MORE ABOUT THEM)
     # initialize cov matrix. Shape is (n,n); n: number of data points
 
     # original line of code
-    # cov = np.empty((*X.shape[:-2], X.shape[-2], X.shape[-2]))
+    cov = np.empty((*X.shape[:-2], X.shape[-2], X.shape[-2]))
     # simplified for better readability
-    cov = np.empty((X.shape[0], X.shape[0]))
+    # cov = np.empty((X.shape[0], X.shape[0]))
 
     # Below, the implementation is being done in blocks, as its heavy on memory
     block_size = 1000 # size of the block to compute once
+
     for i_0, i_1 in ranges(len(X), block_size):
-        for j_0, j_1 in ranges(len(X), block_size):
-            cov[i_0:i_1, j_0:j_1] = (
-                np.dot(X[i_0:i_1, None, :], weight_covariance)
-                * np.asarray(X)[None, j_0:j_1, :]
-            ).sum(axis=-1)
+            for j_0, j_1 in ranges(len(X), block_size):
+                cov[..., i_0:i_1, j_0:j_1] = (
+                    np.dot(X[..., i_0:i_1, None, :], weight_covariance)
+                    * np.asarray(X)[..., None, j_0:j_1, :]
+                ).sum(axis=-1)
+
+    # easy to read implementation:
+    # for i_0, i_1 in ranges(len(X), block_size):
+    #     for j_0, j_1 in ranges(len(X), block_size):
+    #         cov[i_0:i_1, j_0:j_1] = (
+    #             np.dot(X[i_0:i_1, None, :], weight_covariance)
+    #             * np.asarray(X)[None, j_0:j_1, :]
+    #         ).sum(axis=-1)
     # now cov is the linear covariance matrix, using which we can compute which batch to select
 
     # for now, just returning the variance values (diagonal elements) for each datapoint
