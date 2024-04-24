@@ -88,6 +88,7 @@ class SurrogateDataset(Dataset):
         # Initialize Parameters
         self.array_labels = df['array_label'].values
         self.input_npzs = df['128_npz'].values
+        self.cluster_labels = df['cluster_label'].values
         
         self.stress_npzs = df['mean_stress_field_npz'].values
         self.strain_npzs = df['mean_strain_field_npz'].values
@@ -129,43 +130,50 @@ class SurrogateDataModule(LightningDataModule):
     def __init__(self, dataset_info):
         super().__init__()
         # Initialize Parameters
-        df = dataset_info['df'].to_pandas()
-        working_dataset_size = dataset_info['working_dataset_size']
-        labelled_train_size = dataset_info['labelled_train_size']
-        validation_size = dataset_info['validation_size']
-        test_size = dataset_info['test_size']
+        self.dataset_info = dataset_info
+        self.df = dataset_info['df'].to_pandas()
+        self.massif_sample = dataset_info['massif_sample']
+        self.working_dataset_size = dataset_info['working_dataset_size']
+        self.labelled_train_size = dataset_info['labelled_train_size']
+        self.validation_size = dataset_info['validation_size']
+        self.test_size = dataset_info['test_size']
 
         self.num_workers = dataset_info['num_workers']
         self.persistent_workers = dataset_info['persistent_workers']
         self.batch_size = dataset_info['batch_size']
+        
+        self.setup_datasets()
 
-        df = df.sample(frac=1, random_state=42)
-
-        self._shuffle = True
+    def setup_datasets(self):
+        # Shuffle Data
+        df = self.df.sample(frac=1, random_state=42)
 
         # If working_dataset_size is specified, select a subset of the data
-        if working_dataset_size is not None:
-            _, df = train_test_split(df, test_size=working_dataset_size,
-                                     stratify=df['cluster_label'])
+        if self.working_dataset_size is not None:
+            _, df = train_test_split(df, test_size=self.working_dataset_size,
+                stratify=df['cluster_label'] if 'stratified' in self.massif_sample else None,
+                random_state=42)
 
         # Split Data
-        train_df, self.test_df = train_test_split(df, test_size=test_size,
-                                                  stratify=df['cluster_label'])
+        train_df, self.test_df = train_test_split(df, test_size=self.test_size,
+                stratify=df['cluster_label'] if 'stratified' in self.massif_sample else None,
+                random_state=42)
         
-        active_df, self.val_df = train_test_split(train_df, test_size=validation_size,
-                                                  stratify=train_df['cluster_label'])
+        active_df, self.val_df = train_test_split(train_df, test_size=self.validation_size,
+                stratify=train_df['cluster_label'] if 'stratified' in self.massif_sample else None,
+                random_state=42)
         
         # Get Label Indices for Initial Training Data
         self.active_df = active_df.reset_index(drop=True)
-        label_df, _ = train_test_split(self.active_df, train_size=labelled_train_size,
-                                       stratify=self.active_df['cluster_label'],
-                                       random_state=42)
+        label_df, _ = train_test_split(self.active_df, train_size=self.labelled_train_size,
+                stratify=self.active_df['cluster_label'] if 'stratified' in self.massif_sample else None,
+                random_state=42)
         label_mask_indices = label_df.index.values
 
         # Initialize Datasets
-        self.active_dataset = ActiveLearningDataset(SurrogateDataset(dataset_info, active_df))
-        self.validation_dataset = SurrogateDataset(dataset_info, self.val_df)
-        self.test_dataset = SurrogateDataset(dataset_info, self.test_df)
+        self.active_dataset = ActiveLearningDataset(SurrogateDataset(self.dataset_info, active_df))
+        self.validation_dataset = SurrogateDataset(self.dataset_info, self.val_df)
+        self.test_dataset = SurrogateDataset(self.dataset_info, self.test_df)
 
         # Label Initial Training Data
         self.active_dataset.label(label_mask_indices)
@@ -208,6 +216,7 @@ class SurrogateModule(LightningModule):
         self.dropout = model_info['dropout']
         self.num_channels = model_info['num_channels']
         self.num_classes = model_info['num_classes']
+        self.output_type = model_info['output_type']
         self.plot = plot
 
         self.model = self.get_model()
@@ -220,6 +229,7 @@ class SurrogateModule(LightningModule):
         self.sch_factor = hyperparameters['sch_factor']
         self.sch_patience = hyperparameters['sch_patience']
 
+        self.heuristic_name = hyperparameters['heuristic_name']
         self.heuristic = hyperparameters['heuristic']
         self.training_epochs = hyperparameters['training_epochs']
         self.query_size = hyperparameters['query_size']
@@ -288,7 +298,6 @@ class SurrogateModule(LightningModule):
                 max_strain_target = strain_field[i].max().item()
 
                 # Check if the maximum predictions are within the threshold of the maximum targets
-                # Initialize a temporary count for this sample
                 stress_score = abs(max_stress_pred - max_stress_target) / max_stress_target
                 strain_score = abs(max_strain_pred - max_strain_target) / max_strain_target
 
@@ -336,7 +345,7 @@ class SurrogateModule(LightningModule):
             if (self.current_epoch + 1) % self.training_epochs != 0:
                 return  
 
-            self.active_step()
+            mean_stress_uncertainty, mean_strain_uncertainty = self.active_step()
             self.active_count += 1
 
             train_size = len(self.datamodule.active_dataset)
@@ -345,6 +354,8 @@ class SurrogateModule(LightningModule):
 
             # Log 'train_size' and 'success_score' as separate scalars
             self.logger.experiment.add_scalar('train_size', train_size, self.current_epoch)
+            self.logger.experiment.add_scalar('mean_stress_uncertainty', mean_stress_uncertainty, self.current_epoch)
+            self.logger.experiment.add_scalar('mean_strain_uncertainty', mean_strain_uncertainty, self.current_epoch)
             self.logger.experiment.add_scalar(f"success_score({self.success_threshold_1:.2f})",
                                               success_score_1, self.current_epoch)
             self.logger.experiment.add_scalar(f"success_score({self.success_threshold_2:.2f})",
@@ -352,8 +363,6 @@ class SurrogateModule(LightningModule):
 
             self.success_count_1 = 0
             self.success_count_2 = 0
-
-            #self.logger.experiment.add_scalar('uncertainty', uncertainty, self.current_epoch)
            
     def test_step(self, batch, batch_idx):
         loss, score = self.step(batch, batch_idx)
@@ -361,17 +370,17 @@ class SurrogateModule(LightningModule):
         self.log_dict({f"test_loss({self.loss_name})": loss,
                        f"test_score({self.score_name})": score},
                        batch_size=self.batch_size, sync_dist=True)
-    
-    def predict_step(self, batch, batch_idx):
+
+    def predict_step(self, batch, batch_idx, bins=20):
         # Enable Dropout Layers
         self.enable_dropout(self.model)
 
         # Get Input Volume
         x, _ = batch
 
-        # Initialize tensors to store the maximum values for each Monte Carlo iteration
-        stress_max_values = torch.zeros((x.shape[0], 1, self.mc_iterations), device=x.device)
-        strain_max_values = torch.zeros((x.shape[0], 1, self.mc_iterations), device=x.device)
+        # Initialize tensors to store the outputs for each Monte Carlo iteration
+        stress_outputs = torch.zeros((x.shape[0], bins, self.mc_iterations), device=x.device)
+        strain_outputs = torch.zeros((x.shape[0], bins, self.mc_iterations), device=x.device)
 
         for i in range(self.mc_iterations):
             # Get the model's predictions
@@ -381,16 +390,21 @@ class SurrogateModule(LightningModule):
             stress_mask = masks[:, 0, :, :, :].unsqueeze(1)
             strain_mask = masks[:, 1, :, :, :].unsqueeze(1)
 
-            # Get the maximum values for each instance in the batch
-            max_stress = torch.amax(stress_mask, dim=(2, 3, 4))
-            max_strain = torch.amax(strain_mask, dim=(2, 3, 4))
+            if self.output_type == 'max':
+                # Get the maximum values for each instance in the batch
+                stress_output = torch.amax(stress_mask, dim=(2, 3, 4))
+                strain_output = torch.amax(strain_mask, dim=(2, 3, 4))
+            else:
+                # Get the histogram of the values for each instance in the batch
+                stress_output = torch.histc(stress_mask, bins=bins, min=0, max=1)
+                strain_output = torch.histc(strain_mask, bins=bins, min=0, max=1)
+          
+            # Store the outputs for this iteration in the tensors
+            # Tensors should be of shape [batch_size, bins, mc_iterations]
+            stress_outputs[:, :, i] = stress_output
+            strain_outputs[:, :, i] = strain_output
 
-            # Store the maximum values for this iteration in the tensors
-            # Tensors should be of shape [batch_size, 1, mc_iterations]
-            stress_max_values[:, :, i] = max_stress
-            strain_max_values[:, :, i] = max_strain
-
-        return stress_max_values, strain_max_values
+        return stress_outputs, strain_outputs
     
     def predict_on_dataset_generator(self, dataloader):
         if len(dataloader) == 0:
@@ -418,13 +432,64 @@ class SurrogateModule(LightningModule):
                 combined_predictions = [stress_predictions, strain_predictions]
 
                 # Apply the heuristic to the combined predictions
-                to_label = self.heuristic(combined_predictions)
-                if len(to_label) > 0:
-                    self.active_dataset.label(to_label[: self.query_size])
-                    # Calculate average uncertainty
-                    #average_uncertainty = np.mean(uncertainties)
-                    return
+                ranks, scores = self.heuristic(combined_predictions)
+
+                if len(scores) > 0:
+                    if self.heuristic_name == 'USP':
+                        # Call the USP selection function
+                        instances_to_label = self.usp_selection(ranks)
+
+                        # Label the instances based on the USP selection
+                        self.datamodule.active_dataset.label(instances_to_label)
+                    else:
+                        # Label the instances with the greatest variance
+                        self.active_dataset.label(ranks[: self.query_size])
+                    
+                    return np.mean(scores[0]), np.mean(scores[1])
+                
         self.should_stop = True
+    
+    def usp_selection(self, ranks):
+        # Get the unlabeled pool
+        unlabeled_pool = self.datamodule.active_dataset.labelled_map
+        unlabeled_indices = np.where(unlabeled_pool == 0)[0]
+
+        # Get the cluster labels of the unlabeled pool
+        cluster_labels = self.datamodule.active_dataset._dataset.cluster_labels[unlabeled_indices]
+        clusters_unique = np.unique(cluster_labels)
+
+        # Initialize the list of instances to label
+        instances_to_label = []
+
+        # For each cluster, find the instance with the greatest variance and add it to the list of instances to label
+        for cluster_label in clusters_unique:
+            cluster_indices = [index for index, label in enumerate(cluster_labels) if label == cluster_label]
+            # Find the most uncertain instance in the cluster
+            for rank in ranks:
+                if rank in cluster_indices:
+                    instances_to_label.append(rank)
+                    break
+
+        # Find the remaining instances with the greatest variance from the entire unlabeled pool and add them to the list of instances to label
+        remaining_ranks = [rank for rank in ranks if rank not in instances_to_label]
+        remaining_instances_with_greatest_variance = remaining_ranks[:self.query_size - len(instances_to_label)]
+        instances_to_label.extend(remaining_instances_with_greatest_variance)
+
+        return instances_to_label
+    
+    # TODO: Implement UCB Selection for each cluster instead of Variance
+    """
+    @staticmethod
+    def ucb_selection(prediction, std_dev, step, lambda_value=0.1):
+        # Calculate the Upper Confidence Bound
+        beta = 2 * np.log(X_train.shape[0] * ((step+1)**2) * (np.pi**2) / (6 * lambda_value))
+        alpha = prediction + np.sqrt(beta) * std_dev
+
+        # Select the instance with the highest value
+        selected_index = np.argmax(alpha)
+        
+        return selected_index
+    """
     
     def configure_optimizers(self):
         optimizer = getattr(optim, self.optimizer_name)(self.model.parameters(), lr=self.lr)
@@ -495,18 +560,13 @@ class SurrogateModule(LightningModule):
         plt.interactive().close()
 
 
-# TODO: Figure out how to pull out the actual uncertainties as well to keep track of the average
-class Heuristics(CombineHeuristics):
+class SurrogateHeuristics(CombineHeuristics):
     def __init__(self, heuristics, weights):
-        super(Heuristics, self).__init__(heuristics, weights)
+        super(SurrogateHeuristics, self).__init__(heuristics, weights)
     
     def __call__(self, predictions):
-        """Rank the predictions according to their uncertainties.
-
-        Return both the rank and associated uncertainties.
-        """
-        scores = self.get_ranks(predictions)
-        return scores[0], scores[1]
+        # Return both ranks and uncertainties
+        return self.get_ranks(predictions)
 
 
 class Model:
@@ -530,7 +590,7 @@ class Model:
         self.device = training_info['device']
 
         self.hyperparameters = hyperparameters
-        self.heuristic = self.hyperparameters['heuristic']
+        self.heuristic_name = self.hyperparameters['heuristic_name']
         self.active_learning_steps = self.hyperparameters['active_learning_steps']
         self.training_epochs = self.hyperparameters['training_epochs']
 
@@ -589,8 +649,8 @@ class Model:
         self.model_args['datamodule'] = datamodule
 
         # TODO: Choose Heuristic based on string ex. 'variance', 'laplace_approximation', 'random'
-        heuristic = Variance() if self.heuristic == 'variance' else Random()
-        heuristic = CombineHeuristics(heuristics=[heuristic for _ in range(2)], weights=[0.5, 0.5])
+        heuristic = Variance() if self.heuristic_name == 'variance' else Random()
+        heuristic = SurrogateHeuristics(heuristics=[heuristic for _ in range(2)], weights=[0.5, 0.5])
         self.model_args['hyperparameters']['heuristic'] = heuristic
 
         if self.surrogate_ckpt:
@@ -598,8 +658,7 @@ class Model:
         else:
             model = SurrogateModule(**self.model_args)
 
-        self.hyperparameters['heuristic'] = self.heuristic
-        version = f"{self.massif_sample}_{self.heuristic}"
+        version = f"{self.massif_sample}_{self.heuristic_name}"
         version = self.get_next_version('surrogate_model_dir/train_logs/active_learning', version)
 
         logger = TensorBoardLogger('surrogate_model_dir/train_logs',
@@ -666,7 +725,7 @@ class Model:
 
         logger = TensorBoardLogger(f"surrogate_model_dir/test_logs",
                                    name=f"{self.dataset}",
-                                   version=f"{self.massif_sample}_{self.heuristic}",
+                                   version=f"{self.massif_sample}_{self.heuristic_name}",
                                    default_hp_metric=False)
 
         trainer = Trainer(logger=logger,
@@ -698,11 +757,11 @@ class Model:
         return f'{base_version}_{max(version_numbers) + 1}'
 
 
-def main(device=None, params=None):
+def main(device=None, params=('stratified_0', 'USP')):
     # TODO: Params loader
     # Arguments
     dataset = 'ct_scans'
-    massif_sample = 'stratified_0'  # Which MASSIF sample to use with active_learning and test. 'stratified_0' or 'random_0'
+    massif_sample = params[0] # 'stratified_0'  # Which MASSIF sample to use with active_learning and test. 'stratified_0' or 'random_0'
     include = 'all'  # 'all' or ('TTT-AM-P-1-62',...) to use with get_stress_fields
     working_dataset_size = None  # None, float (0.0 to 1.0), or int (number of samples)
     num_workers = 12  # Select number of CPU resources for data loading
@@ -715,10 +774,11 @@ def main(device=None, params=None):
     freeze_encoder = False  # True or False
     decoder = 'unet'  # 'unet' or 'unet++'
     decoder_attention = 'scse'  # None, 'se', or 'scse'
-    decoder_dropout = 0.4  # None or float
-    head_dropout = 0.3  # None or float
+    decoder_dropout = 0.5  # None or float
+    head_dropout = 0.5  # None or float
     num_channels = 1  # 1 or 3
     num_classes = 2  # int (number of output masks)
+    output_type = 'histogram'  # 'max' or 'histogram'
     surrogate_ckpt = None  # None or 'surrogate_model_dir/unet_scse_pretraining_ct_scans_sample_0.ckpt'
     
     # Training Details
@@ -729,7 +789,7 @@ def main(device=None, params=None):
     device = device  # None or select GPU: 0, 1, 2, 3
 
     # Active Learning Hyperparameters
-    heuristic = 'variance'  # 'variance', 'random', TODO: 'laplace_approximation', TODO: multiple weighted heuristics
+    heuristic = params[1] # 'variance'  # 'USP', 'variance', 'random', TODO: 'laplace_approximation'
     labelled_train_size = 750  # Training data size to label initially, float (0.0 to 1.0), or int (number of samples)
     validation_size = 500  # Validation data size, float (0.0 to 1.0), or int (number of samples)
     test_size = 250  # Test data size, float (0.0 to 1.0), or int (number of samples)
@@ -741,8 +801,8 @@ def main(device=None, params=None):
     # Model Hyperparameters
     loss = MSELoss()
     score = R2Score()
-    success_threshold_1 = 0.05  # Percentage threshold for success metric
-    success_threshold_2 = 0.1  # Percentage threshold for success metric
+    success_threshold_1 = 0.05  # Percentage threshold for success metric based on if within 5% of max value
+    success_threshold_2 = 0.1  # Percentage threshold for success metric based on if within 5% of max value
     optimizer_name = 'AdamW'
     batch_size = 6
     lr = 0.0022980
@@ -769,10 +829,10 @@ def main(device=None, params=None):
                   'surrogate_ckpt': surrogate_ckpt, 'freeze_encoder': freeze_encoder,
                   'decoder': decoder, 'decoder_attention': decoder_attention, 
                   'dropout': {'decoder_dropout': decoder_dropout, 'head_dropout': head_dropout},
-                  'num_channels': num_channels,'num_classes': num_classes,
+                  'num_channels': num_channels,'num_classes': num_classes, 'output_type': output_type,
                   'training_info': training_info, 'plot': plot_volumes}
     
-    hyperparameters = {'heuristic': heuristic, 'active_learning_steps': active_learning_steps,
+    hyperparameters = {'heuristic_name': heuristic, 'active_learning_steps': active_learning_steps,
                        'training_epochs': training_epochs, 'mc_iterations': mc_sampling_iterations,
                        'query_size': query_size, 'loss': loss, 'score': score,
                        'success_threshold_1': success_threshold_1, 'success_threshold_2': success_threshold_2,
@@ -786,7 +846,14 @@ def main(device=None, params=None):
     else: print("Invalid task"); sys.exit()
 
 def worker(device, params):
-    main(device, params)
+    if device == 0:  # Only print output for device 0
+        main(device, params)
+    else:
+        # Redirect stdout and stderr to null for other devices
+        with open(os.devnull, 'w') as f:
+            sys.stdout = f
+            sys.stderr = f
+            main(device, params)
 
 def finish_time(start_time):
     duration = round(((time.time() - start_time))/60, 2)
@@ -804,7 +871,10 @@ def finish_time(start_time):
 if __name__ == "__main__":
     # TODO: Params loader
     devices = None  # None or iterable of gpu devices (0, 1, 2, 3)
-    params_list = None # None or iterable of parameter sets
+    params_list = [('stratified_0', 'variance'),  # None or iterable of parameter sets
+                   ('stratified_0', 'random'),
+                   ('random_0', 'variance'),
+                   ('random_0', 'random')]
 
     start_time = time.time()
 
@@ -818,7 +888,6 @@ if __name__ == "__main__":
         for p in processes:
             p.join()
     else:
-        main(params_list=params_list)
+        main()
 
     finish_time(start_time)
-    
