@@ -3,6 +3,8 @@ from efficient_models_pytorch_3d import EfficientUnet3D, EfficientUnetPlusPlus3D
 
 # Install packages
 import torch
+from torch import nn
+from torch.functional import F
 from torch.utils.data import Dataset, DataLoader
 from torch.nn import MSELoss
 from torch import optim
@@ -151,22 +153,22 @@ class SurrogateDataModule(LightningDataModule):
         # If working_dataset_size is specified, select a subset of the data
         if self.working_dataset_size is not None:
             _, df = train_test_split(df, test_size=self.working_dataset_size,
-                stratify=df['cluster_label'] if 'stratified' in self.massif_sample else None,
+                stratify=None if 'random' in self.massif_sample else df['cluster_label'],
                 random_state=42)
 
         # Split Data
         train_df, self.test_df = train_test_split(df, test_size=self.test_size,
-                stratify=df['cluster_label'] if 'stratified' in self.massif_sample else None,
+                stratify=None if 'random' in self.massif_sample else df['cluster_label'],
                 random_state=42)
-        
+
         active_df, self.val_df = train_test_split(train_df, test_size=self.validation_size,
-                stratify=train_df['cluster_label'] if 'stratified' in self.massif_sample else None,
+                stratify=None if 'random' in self.massif_sample else train_df['cluster_label'],
                 random_state=42)
-        
+
         # Get Label Indices for Initial Training Data
         self.active_df = active_df.reset_index(drop=True)
         label_df, _ = train_test_split(self.active_df, train_size=self.labelled_train_size,
-                stratify=self.active_df['cluster_label'] if 'stratified' in self.massif_sample else None,
+                stratify=None if 'random' in self.massif_sample else self.active_df['cluster_label'],
                 random_state=42)
         label_mask_indices = label_df.index.values
 
@@ -202,7 +204,40 @@ class SurrogateDataModule(LightningDataModule):
 
     def state_dict(self):
         return {"active_dataset": self.active_dataset.state_dict()}
-            
+
+
+class BoundaryMSELoss(nn.Module):
+    def __init__(self, boundary_weight=1, inner_kernel_size = 3, outer_kernel_size = 3, alpha=0.5):
+        super(BoundaryMSELoss, self).__init__()
+        self.boundary_weight = boundary_weight
+        self.inner_kernel_size = inner_kernel_size
+        self.outer_kernel_size = outer_kernel_size
+        self.alpha = alpha
+        self.mse = MSELoss()
+
+    def forward(self, x, inputs, targets):
+        # Calculate BCELoss
+        mse_loss = self.mse(inputs, targets)
+
+        # Calculate outer boundary map with dilated volumes
+        dilated_volumes = F.max_pool3d(x, kernel_size=self.outer_kernel_size, stride=1, padding=1)
+        outer_boundary_map = (dilated_volumes - x).abs()
+
+        # Calculate inner boundary map with dilated background
+        background = 1 - x
+        dilated_background = F.max_pool3d(background, kernel_size=self.inner_kernel_size, stride=1, padding=1)
+        inner_boundary_map = (dilated_background - background).abs()
+
+        # Combine outer and inner boundary maps
+        boundary_map = outer_boundary_map + inner_boundary_map
+
+        # Apply weighted boundary map to BCELoss
+        boundary_mse_loss = self.boundary_weight * boundary_map * mse_loss
+
+        # Combine the two losses
+        loss = self.alpha * boundary_mse_loss + (1 - self.alpha) * mse_loss
+        return loss.mean()
+
 
 class SurrogateModule(LightningModule):
     def __init__(self, model_info, hyperparameters, datamodule, plot=False):
@@ -279,11 +314,11 @@ class SurrogateModule(LightningModule):
         masks = self.model(x)
 
         stress_mask = masks[:,0,:,:,:].unsqueeze(1)
-        stress_loss = self.loss(stress_mask, stress_field)
+        stress_loss = self.loss(x, stress_mask, stress_field)
         stress_score = self.score(stress_mask.flatten(), stress_field.flatten())
 
         strain_mask = masks[:,1,:,:,:].unsqueeze(1)
-        strain_loss = self.loss(strain_mask, strain_field)
+        strain_loss = self.loss(x, strain_mask, strain_field)
         strain_score = self.score(strain_mask.flatten(), strain_field.flatten())
 
         loss = stress_loss + strain_loss
@@ -648,8 +683,7 @@ class Model:
         datamodule = SurrogateDataModule(self.dataset_info)
         self.model_args['datamodule'] = datamodule
 
-        # TODO: Choose Heuristic based on string ex. 'variance', 'laplace_approximation', 'random'
-        heuristic = Variance() if self.heuristic_name == 'variance' else Random()
+        heuristic = Random() if self.heuristic_name == 'random' else Variance()
         heuristic = SurrogateHeuristics(heuristics=[heuristic for _ in range(2)], weights=[0.5, 0.5])
         self.model_args['hyperparameters']['heuristic'] = heuristic
 
@@ -799,7 +833,7 @@ def main(device=None, params=('stratified_0', 'USP')):
     query_size = 40  # Total queries = active_learning_steps * query_size = 25 * 40 = 1000
     
     # Model Hyperparameters
-    loss = MSELoss()
+    loss = BoundaryMSELoss(boundary_weight=250, inner_kernel_size = 3, outer_kernel_size = 3, alpha=0.5)
     score = R2Score()
     success_threshold_1 = 0.05  # Percentage threshold for success metric based on if within 5% of max value
     success_threshold_2 = 0.1  # Percentage threshold for success metric based on if within 5% of max value
@@ -870,10 +904,10 @@ def finish_time(start_time):
 
 if __name__ == "__main__":
     # TODO: Params loader
-    devices = None  # None or iterable of gpu devices (0, 1, 2, 3)
-    params_list = [('stratified_0', 'variance'),  # None or iterable of parameter sets
+    devices = (0, 1, 2, 3)  # None or iterable of gpu devices (0, 1, 2, 3)
+    params_list = [('stratified_0', 'USP'),  # None or iterable of parameter sets
                    ('stratified_0', 'random'),
-                   ('random_0', 'variance'),
+                   ('random_0', 'USP'),
                    ('random_0', 'random')]
 
     start_time = time.time()
